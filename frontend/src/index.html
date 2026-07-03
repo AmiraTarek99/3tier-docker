@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Docker Full Stack App</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+ 
+    header {
+      background: #1e293b;
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      border-bottom: 1px solid #334155;
+    }
+    header h1 { font-size: 1.4rem; font-weight: 600; }
+ 
+    .badge {
+      background: #22c55e; color: #052e16;
+      font-size: 0.72rem; padding: 3px 10px;
+      border-radius: 999px; font-weight: 700;
+    }
+    .badge.error { background: #ef4444; color: #fff; }
+    .badge.loading { background: #f59e0b; color: #451a03; }
+ 
+    main { max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; }
+ 
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .card h2 {
+      font-size: 0.75rem; font-weight: 700; color: #64748b;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      margin-bottom: 1rem;
+    }
+ 
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
+    .stat {
+      background: #0f172a; border: 1px solid #1e293b;
+      border-radius: 8px; padding: 0.9rem 1rem;
+    }
+    .stat-label { font-size: 0.72rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-value { font-size: 1.5rem; font-weight: 700; color: #818cf8; margin-top: 4px; }
+ 
+    .form-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    input[type=text] {
+      flex: 1; min-width: 160px;
+      background: #0f172a; border: 1px solid #475569;
+      border-radius: 8px; padding: 0.6rem 1rem;
+      color: #e2e8f0; font-size: 0.95rem; outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type=text]:focus { border-color: #6366f1; }
+ 
+    button {
+      background: #6366f1; color: #fff; border: none;
+      border-radius: 8px; padding: 0.6rem 1.3rem;
+      cursor: pointer; font-weight: 600; font-size: 0.9rem;
+      transition: background 0.2s;
+    }
+    button:hover { background: #4f46e5; }
+    button.btn-danger { background: #dc2626; }
+    button.btn-danger:hover { background: #b91c1c; }
+ 
+    .item-list { display: flex; flex-direction: column; gap: 0.6rem; }
+    .item {
+      background: #0f172a; border: 1px solid #1e293b;
+      border-radius: 8px; padding: 0.8rem 1rem;
+      display: flex; justify-content: space-between; align-items: center;
+      transition: border-color 0.2s;
+    }
+    .item:hover { border-color: #334155; }
+    .item-name { font-weight: 600; font-size: 0.95rem; }
+    .item-desc { font-size: 0.82rem; color: #94a3b8; margin-top: 2px; }
+    .item-meta { font-size: 0.72rem; color: #475569; margin-top: 4px; }
+ 
+    .empty { text-align: center; color: #475569; padding: 2.5rem 1rem; font-size: 0.9rem; }
+ 
+    .links { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 1rem; }
+    .links a {
+      background: #0f172a; color: #94a3b8;
+      text-decoration: none; padding: 0.4rem 0.85rem;
+      border-radius: 6px; font-size: 0.82rem;
+      border: 1px solid #334155;
+      transition: all 0.2s;
+    }
+    .links a:hover { background: #1e293b; color: #e2e8f0; border-color: #475569; }
+ 
+    #toast {
+      position: fixed; bottom: 1.5rem; left: 50%;
+      transform: translateX(-50%);
+      background: #22c55e; color: #052e16;
+      padding: 0.6rem 1.6rem; border-radius: 999px;
+      font-weight: 700; font-size: 0.9rem;
+      opacity: 0; transition: opacity 0.3s;
+      pointer-events: none; white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+ 
+<header>
+  <span style="font-size:1.5rem">🐳</span>
+  <h1>Docker Full Stack App</h1>
+  <span id="status-badge" class="badge loading">Connecting...</span>
+</header>
+ 
+<main>
+ 
+  <!-- System Status -->
+  <div class="card">
+    <h2>System Status</h2>
+    <div class="stats-grid">
+      <div class="stat">
+        <div class="stat-label">Total Items</div>
+        <div class="stat-value" id="total-count">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">API Status</div>
+        <div class="stat-value" id="api-status" style="font-size:1rem;margin-top:8px">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Database</div>
+        <div class="stat-value" id="db-status" style="font-size:1rem;margin-top:8px">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Last Checked</div>
+        <div class="stat-value" id="last-checked" style="font-size:0.75rem;margin-top:10px;color:#64748b">—</div>
+      </div>
+    </div>
+    <div class="links">
+      <a href="/api/health" target="_blank">🔍 API Health</a>
+      <a href="/api/items"  target="_blank">📦 API Items</a>
+      <a href="http://localhost:3001" target="_blank">📊 Grafana</a>
+      <a href="http://localhost:9090" target="_blank">📈 Prometheus</a>
+      <a href="http://localhost:8080" target="_blank">🖥️ cAdvisor</a>
+    </div>
+  </div>
+ 
+  <!-- Add Item Form -->
+  <div class="card">
+    <h2>Add New Item</h2>
+    <div class="form-row">
+      <input type="text" id="item-name" placeholder="Item name (required)" />
+      <input type="text" id="item-desc" placeholder="Description (optional)" />
+      <button onclick="addItem()">+ Add Item</button>
+    </div>
+  </div>
+ 
+  <!-- Items List -->
+  <div class="card">
+    <h2>Items stored in PostgreSQL</h2>
+    <div class="item-list" id="items-list">
+      <div class="empty">Loading data from database...</div>
+    </div>
+  </div>
+ 
+</main>
+ 
+<div id="toast"></div>
+ 
+<script>
+  const API = '/api';
+ 
+  // Check API and DB health
+  async function checkHealth() {
+    try {
+      const res = await fetch(`${API}/health`);
+      const data = await res.json();
+ 
+      const ok = data.status === 'ok';
+      document.getElementById('api-status').textContent   = ok ? '✅ Running'   : '❌ Error';
+      document.getElementById('db-status').textContent    = data.database === 'connected' ? '✅ Connected' : '❌ Disconnected';
+      document.getElementById('status-badge').textContent = ok ? 'All Systems OK' : 'Degraded';
+      document.getElementById('status-badge').className   = 'badge' + (ok ? '' : ' error');
+      document.getElementById('last-checked').textContent = new Date().toLocaleTimeString();
+    } catch {
+      document.getElementById('api-status').textContent   = '❌ Unreachable';
+      document.getElementById('status-badge').textContent = 'Offline';
+      document.getElementById('status-badge').className   = 'badge error';
+    }
+  }
+ 
+  // Fetch and render items
+  async function loadItems() {
+    try {
+      const res  = await fetch(`${API}/items`);
+      const data = await res.json();
+ 
+      document.getElementById('total-count').textContent = data.count;
+      const list = document.getElementById('items-list');
+ 
+      if (data.items.length === 0) {
+        list.innerHTML = '<div class="empty">No items yet — add your first one above!</div>';
+        return;
+      }
+ 
+      list.innerHTML = data.items.map(item => `
+        <div class="item">
+          <div>
+            <div class="item-name">${esc(item.name)}</div>
+            ${item.description ? `<div class="item-desc">${esc(item.description)}</div>` : ''}
+            <div class="item-meta">ID: ${item.id} &nbsp;·&nbsp; ${new Date(item.created_at).toLocaleString()}</div>
+          </div>
+          <button class="btn-danger" onclick="deleteItem(${item.id})">Delete</button>
+        </div>
+      `).join('');
+    } catch {
+      document.getElementById('items-list').innerHTML =
+        '<div class="empty">Failed to load items. Is the API running?</div>';
+    }
+  }
+ 
+  // Add a new item
+  async function addItem() {
+    const name = document.getElementById('item-name').value.trim();
+    const desc = document.getElementById('item-desc').value.trim();
+    if (!name) { showToast('Name is required!', true); return; }
+ 
+    try {
+      const res = await fetch(`${API}/items`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ name, description: desc }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+ 
+      document.getElementById('item-name').value = '';
+      document.getElementById('item-desc').value = '';
+      showToast('Item added successfully!');
+      loadItems();
+    } catch (err) {
+      showToast('Error: ' + err.message, true);
+    }
+  }
+ 
+  // Delete an item
+  async function deleteItem(id) {
+    try {
+      await fetch(`${API}/items/${id}`, { method: 'DELETE' });
+      showToast('Item deleted.');
+      loadItems();
+    } catch {
+      showToast('Failed to delete item.', true);
+    }
+  }
+ 
+  // Escape HTML to prevent XSS
+  function esc(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+ 
+  // Toast notification
+  function showToast(msg, isError = false) {
+    const el = document.getElementById('toast');
+    el.textContent        = msg;
+    el.style.background   = isError ? '#ef4444' : '#22c55e';
+    el.style.color        = isError ? '#fff'    : '#052e16';
+    el.style.opacity      = 1;
+    setTimeout(() => el.style.opacity = 0, 2800);
+  }
+ 
+  // Initial load
+  checkHealth();
+  loadItems();
+ 
+  // Refresh every 10 seconds
+  setInterval(() => { checkHealth(); loadItems(); }, 10000);
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+global:
+  scrape_interval:     15s   # Pull metrics from targets every 15 seconds
+  evaluation_interval: 15s   # Evaluate alerting rules every 15 seconds
+
+scrape_configs:
+
+  # Prometheus scrapes itself (useful for meta-monitoring)
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # cAdvisor exports per-container CPU, RAM, network, and disk metrics
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # Node.js backend exposes custom app metrics at /metrics
+  - job_name: 'backend-api'
+    static_configs:
+      - targets: ['backend:4000']
+    metrics_path: /metrics
+    scrape_interval: 15s

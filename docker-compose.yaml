@@ -1,0 +1,433 @@
+# =============================================================================
+# Docker Full Stack: Proxy + Frontend + Backend + Database + Monitoring
+# VM specs: 1GB RAM | 2 CPU cores
+# OS + Docker daemon overhead: ~200MB RAM | ~0.20 CPU reserved
+# Available for containers:   ~824MB RAM | ~1.80 CPU
+# =============================================================================
+
+services:
+
+  # ── 1. REVERSE PROXY (Nginx) ───────────────────────────────────────────────
+  # Entry point for ALL traffic. Routes:
+  #   /     → frontend
+  #   /api  → backend
+  proxy:
+    image: nginx:1.25-alpine
+    container_name: proxy
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - proxy_network
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+    # Restart policy: always
+    # Reason: The proxy is the single entry point to the entire stack.
+    # Any crash must be recovered immediately with no manual intervention.
+    restart: always
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/nginx-health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+    # CPU: 0.15 — Nginx only routes packets, no computation at all.
+    # RAM: 32MB — Nginx idle footprint is ~5MB. 32MB is a safe ceiling.
+    # Reduced from 0.25 CPU / 64MB because on a 1GB VM every MB counts.
+    deploy:
+      resources:
+        limits:
+          cpus: '0.15'
+          memory: 32M
+        reservations:
+          cpus: '0.02'
+          memory: 16M
+
+    # json-file with tight rotation — proxy generates the most log volume.
+    # 5MB × 3 files = 15MB max on disk.
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+        tag: "proxy"
+
+  # ── 2. FRONTEND (Static SPA served by Nginx) ───────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    networks:
+      - proxy_network
+    expose:
+      - "3000"
+
+    # Restart policy: always
+    # Reason: Serving a static file should never fail. Any crash is unexpected
+    # and should be recovered automatically.
+    restart: always
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+    # CPU: 0.10 — reads one HTML file off disk and sends it. Near-zero CPU.
+    # RAM: 24MB — Nginx base is ~5MB. 24MB gives plenty of headroom for
+    # connection buffers even with multiple concurrent visitors.
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 24M
+        reservations:
+          cpus: '0.01'
+          memory: 12M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+        tag: "frontend"
+
+  # ── 3. BACKEND (Node.js REST API) ──────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend
+    networks:
+      - proxy_network
+      - backend_network
+    expose:
+      - "4000"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=appdb
+      - DB_USER=appuser
+      - DB_PASSWORD=apppassword
+      - PORT=4000
+      - NODE_ENV=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    # Restart policy: on-failure (max 5 attempts)
+    # Reason: The backend can fail on first startup if the DB isn't fully ready
+    # (race condition). on-failure lets Docker retry automatically. We cap at 5
+    # to avoid an infinite crash loop if there's a real config error.
+    restart: on-failure
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 5
+
+    # CPU: 0.40 — Node.js is single-threaded and I/O-bound. 0.40 handles
+    # moderate API traffic comfortably on this VM without starving the DB.
+    # RAM: 128MB — Node.js runtime (~30MB) + V8 heap + pg connection pool.
+    # 128MB is the minimum safe value for a production Node.js process.
+    deploy:
+      resources:
+        limits:
+          cpus: '0.40'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 64M
+
+    # Larger log rotation for the backend — these logs are the most valuable
+    # for debugging. 10MB × 5 files = 50MB max.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+        tag: "backend"
+
+  # ── 4. DATABASE (PostgreSQL) ────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    networks:
+      - backend_network
+    expose:
+      - "5432"
+    environment:
+      - POSTGRES_DB=appdb
+      - POSTGRES_USER=appuser
+      - POSTGRES_PASSWORD=apppassword
+      # Tune Postgres memory to fit our 256MB limit.
+      # shared_buffers = 25% of container RAM limit (256MB × 25% = 64MB)
+      # work_mem = memory per sort/hash operation — keep low to avoid OOM
+      # maintenance_work_mem = for VACUUM, index builds
+      - POSTGRES_INITDB_ARGS=--auth-local=trust
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    command: >
+      postgres
+        -c shared_buffers=64MB
+        -c work_mem=4MB
+        -c maintenance_work_mem=32MB
+        -c max_connections=20
+        -c effective_cache_size=128MB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=8MB
+        -c log_min_duration_statement=1000
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+
+    # Restart policy: unless-stopped
+    # Reason: The DB must recover from crashes automatically. But if we manually
+    # run `docker compose stop postgres` for a backup or migration, Docker should
+    # NOT restart it and interfere. unless-stopped handles both cases correctly.
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+    # CPU: 0.60 — Postgres needs more CPU than any other service because it
+    # executes queries, manages WAL writes, runs autovacuum, etc.
+    # RAM: 256MB — This is the tightest constraint. We tuned shared_buffers
+    # and work_mem above to stay inside this limit. PostgreSQL WILL crash with
+    # OOM if you give it less than ~200MB on a real workload.
+    deploy:
+      resources:
+        limits:
+          cpus: '0.60'
+          memory: 256M
+        reservations:
+          cpus: '0.10'
+          memory: 128M
+
+    # Keep more log history for the DB — critical for crash forensics.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+        tag: "postgres"
+
+  # ── 5. cADVISOR (Container metrics exporter) ───────────────────────────────
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    networks:
+      - monitoring_network
+    expose:
+      - "8080"
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    privileged: true
+
+    # Restart policy: always
+    # Reason: Monitoring must stay up. A gap in cAdvisor = blind spot in
+    # Grafana dashboards with no way to know what happened during the gap.
+    restart: always
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+    # CPU: 0.20 — cAdvisor reads /proc and /sys periodically. It spikes
+    # briefly every scrape interval then idles. 0.20 is enough.
+    # RAM: 80MB — cAdvisor keeps a short in-memory metric buffer. It can
+    # spike to ~60-70MB on startup then settle. 80MB prevents OOM kills.
+    deploy:
+      resources:
+        limits:
+          cpus: '0.20'
+          memory: 80M
+        reservations:
+          cpus: '0.02'
+          memory: 40M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+        tag: "cadvisor"
+
+  # ── 6. PROMETHEUS (Metrics time-series database) ───────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    networks:
+      - monitoring_network
+      - backend_network
+    expose:
+      - "9090"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+    # Restart policy: always
+    # Reason: If Prometheus restarts it loads from its persistent volume
+    # with zero data loss. Always restart to keep metrics flowing.
+    restart: always
+
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=3d'
+      # Reduced from 7d to 3d — on a 1GB VM disk space is also limited.
+      # 3 days of metrics is enough for a demo/dev environment.
+      - '--storage.tsdb.retention.size=200MB'
+      # Hard cap on disk usage for metrics storage.
+      - '--web.enable-lifecycle'
+      - '--query.max-concurrency=2'
+      # Limit concurrent queries to reduce RAM pressure on a small VM.
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+    # CPU: 0.30 — Prometheus scrapes targets every 15s and runs PromQL
+    # queries when Grafana loads dashboards. 0.30 is enough for 3 targets.
+    # RAM: 200MB — Prometheus keeps its TSDB head block in memory. With 3d
+    # retention and ~3 scrape targets, 200MB is a realistic minimum.
+    # This was 512MB before — cut to 200MB for the 1GB VM constraint.
+    deploy:
+      resources:
+        limits:
+          cpus: '0.30'
+          memory: 200M
+        reservations:
+          cpus: '0.05'
+          memory: 100M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+        tag: "prometheus"
+
+  # ── 7. GRAFANA (Dashboards & Visualization) ────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    networks:
+      - monitoring_network
+    expose:
+      - "3000"
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/docker-stack.json
+      # Disable analytics and update checks — saves background CPU/network
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      # Reduce Grafana's internal server workers to save RAM
+      - GF_SERVER_ROUTER_LOGGING=false
+
+    depends_on:
+      - prometheus
+
+    # Restart policy: always
+    # Reason: Grafana is a pure UI layer. Any crash should auto-recover.
+    # There's no risk of a restart loop since it has no external dependencies
+    # that could fail (it just queries Prometheus which is on the same network).
+    restart: always
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+    # CPU: 0.20 — Grafana runs PromQL queries when you load a dashboard.
+    # Idle it uses almost nothing. 0.20 is enough for one user at a time.
+    # RAM: 96MB — Grafana's Go runtime is ~50MB at idle. 96MB gives headroom
+    # for dashboard rendering without OOM risk.
+    deploy:
+      resources:
+        limits:
+          cpus: '0.20'
+          memory: 96M
+        reservations:
+          cpus: '0.02'
+          memory: 48M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+        tag: "grafana"
+
+
+# =============================================================================
+# NETWORKS — Isolation strategy
+# =============================================================================
+# proxy_network    → proxy ↔ frontend, proxy ↔ backend
+# backend_network  → backend ↔ postgres, prometheus ↔ backend (for scraping)
+# monitoring_network → cadvisor, prometheus, grafana (isolated monitoring plane)
+#
+# The database is ONLY on backend_network.
+# The frontend is ONLY on proxy_network.
+# The outside world only reaches port 80 (proxy), 8080, 9090, 3001.
+# =============================================================================
+networks:
+  proxy_network:
+    driver: bridge
+    name: proxy_network
+
+  backend_network:
+    driver: bridge
+    name: backend_network
+
+  monitoring_network:
+    driver: bridge
+    name: monitoring_network
+
+
+# =============================================================================
+# VOLUMES — Persistent data that survives container restarts
+# =============================================================================
+volumes:
+  pg_data:
+    name: pg_data
+  prometheus_data:
+    name: prometheus_data
+  grafana_data:
+    name: grafana_data

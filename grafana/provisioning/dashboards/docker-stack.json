@@ -1,0 +1,65 @@
+{
+  "title": "Docker Full Stack Monitor",
+  "uid": "docker-stack-001",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Running Containers",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "count(container_last_seen{name!=''})", "legendFormat": "containers" }],
+      "options": { "colorMode": "background", "graphMode": "none" }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Total API Requests",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "sum(http_requests_total)", "legendFormat": "requests" }],
+      "options": { "colorMode": "background", "graphMode": "area" }
+    },
+    {
+      "id": 3, "type": "stat", "title": "API Error Rate (%)",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "sum(rate(http_requests_total{status_code=~'5..'}[5m])) / sum(rate(http_requests_total[5m])) * 100", "legendFormat": "error %" }],
+      "options": { "colorMode": "background", "graphMode": "none" }
+    },
+    {
+      "id": 4, "type": "stat", "title": "p95 Response Time (ms)",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) * 1000", "legendFormat": "p95 ms" }]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "CPU Usage per Container (%)",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum(rate(container_cpu_usage_seconds_total{name!=''}[2m])) by (name) * 100", "legendFormat": "{{name}}" }]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Memory Usage per Container (MB)",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [{ "expr": "container_memory_usage_bytes{name!=''} / 1024 / 1024", "legendFormat": "{{name}}" }]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "HTTP Request Rate (req/s by route)",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum(rate(http_requests_total[2m])) by (route, method)", "legendFormat": "{{method}} {{route}}" }]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "API Response Time Percentiles (ms)",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) * 1000", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) * 1000", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) * 1000", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Network I/O per Container (bytes/s)",
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 8 },
+      "targets": [
+        { "expr": "sum(rate(container_network_receive_bytes_total{name!=''}[2m])) by (name)", "legendFormat": "RX {{name}}" },
+        { "expr": "sum(rate(container_network_transmit_bytes_total{name!=''}[2m])) by (name)", "legendFormat": "TX {{name}}" }
+      ]
+    }
+  ]
+}
