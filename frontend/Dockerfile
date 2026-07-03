@@ -11,6 +11,3 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 3000
 
-# Healthcheck: use curl, not wget — wget is not in nginx:alpine
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD curl -f http://localhost:3000/healthz || exit 1
