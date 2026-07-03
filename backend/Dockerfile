@@ -9,7 +9,7 @@ WORKDIR /app
 # Copy package files first to leverage Docker layer caching.
 # If package.json doesn't change, npm install won't re-run on rebuild.
 COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm install --only=production && npm cache clean --force
 
 # Copy source code
 COPY src/ ./src/
